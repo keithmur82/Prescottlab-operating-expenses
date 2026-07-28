@@ -1,0 +1,364 @@
+// =====================================================
+// CONFIG
+// =====================================================
+const QB_REALM   = 'mit.quickbase.com';
+const QB_TOKEN   = 'b7kkpt_bkcg_0_ctgaj8yy7byuk2iezzhd5d46g2';
+const TABLE_ID   = 'bv569jz6b';
+const SUPERVISOR = 'Prescott /Sara L';
+
+const FIDS = {
+  supervisor:   20,
+  creationDate: 21,
+  category:      8,
+  accountName:   9,
+  accountId:    10,
+  totalAmount:  11
+};
+
+const EXCLUDED = [];
+// =====================================================
+
+function dashboard() {
+  return {
+    loading: true,
+    error: '',
+    lastUpdated: '',
+    rawData: [],
+    filteredData: [],
+    filteredCount: 0,
+    currentRange: 'ytd',
+    customStart: '',
+    customEnd: '',
+    tableSearch: '',
+    ranges: [
+      { key: 'last30', label: 'Last 30'      },
+      { key: 'last90', label: 'Last 90'      },
+      { key: 'ytd',    label: 'YTD'          },
+      { key: 'fy',     label: `FY${getFY()}` },
+      { key: 'all',    label: 'All Time'     },
+      { key: 'custom', label: 'Custom'       }
+    ],
+    kpis: { totalSpent: 0, totalOrders: 0, topCategory: '—', avgTransaction: 0 },
+    charts: {},
+
+    async init() {
+      await this.loadData();
+    },
+
+    async loadData() {
+      this.loading = true;
+      this.error   = '';
+      try {
+        const r = await fetch('https://api.quickbase.com/v1/records/query', {
+          method: 'POST',
+          headers: {
+            'QB-Realm-Hostname': QB_REALM,
+            'Authorization':     `QB-USER-TOKEN ${QB_TOKEN}`,
+            'Content-Type':      'application/json'
+          },
+          body: JSON.stringify({
+            from:    TABLE_ID,
+            select:  Object.values(FIDS),
+            where:   `{'${FIDS.supervisor}'.EX.'${SUPERVISOR}'}`,
+            options: { top: 5000 }
+          })
+        });
+        if (!r.ok) throw new Error(`Quickbase API ${r.status}: ${await r.text()}`);
+        const json       = await r.json();
+        this.rawData     = (json.data || []).map(row => normalizeRow(row));
+        this.lastUpdated = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        this.applyFilters();
+      } catch (e) {
+        this.error = e.message;
+        console.error(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    setRange(key) {
+      this.currentRange = key;
+      if (key !== 'custom') this.applyFilters();
+    },
+
+    applyFilters() {
+  const [start, end] = getDateBounds(this.currentRange, this.customStart, this.customEnd);
+  this.filteredData  = this.rawData.filter(d => {
+    if (EXCLUDED.includes(d.category))    return false;
+    if (EXCLUDED.includes(d.accountName)) return false;
+    if (!start && !end) return true;
+    if (!d.creationDate) return false;
+    const t = new Date(d.creationDate).getTime();
+    if (start && t < start) return false;
+    if (end   && t > end  ) return false;
+    return true;
+  });
+  this.filteredCount = this.filteredData.length;
+  this.computeKPIs();
+  this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
+},
+
+    computeKPIs() {
+  const totalSpent  = kSum(this.filteredData.map(d => d.totalAmount));
+  const totalOrders = this.filteredData.length;
+
+  const catTotals = {};
+  this.filteredData.forEach(d => {
+    const cat = d.category || 'Unknown';
+    catTotals[cat] = (catTotals[cat] || 0) + d.totalAmount;
+  });
+
+  const acctTotals = {};
+  this.filteredData.forEach(d => {
+    const acct = d.accountName || 'Unknown';
+    acctTotals[acct] = (acctTotals[acct] || 0) + d.totalAmount;
+  });
+
+  const topCategory    = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+  const topAccount     = Object.entries(acctTotals).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+  const avgTransaction = totalOrders > 0 ? totalSpent / totalOrders : 0;
+  this.kpis = { totalSpent, totalOrders, topCategory, topAccount, avgTransaction };
+},
+
+    get categoryBreakdown() {
+      const map = {};
+      this.filteredData.forEach(d => {
+        const cat = d.category || 'Unknown';
+        if (!map[cat]) map[cat] = { name: cat, total: 0, count: 0 };
+        map[cat].total += d.totalAmount;
+        map[cat].count += 1;
+      });
+      const grand = this.kpis.totalSpent;
+      return Object.values(map)
+        .sort((a, b) => b.total - a.total)
+        .map(g => ({
+          ...g,
+          pct: grand !== 0 ? ((g.total / grand) * 100).toFixed(1) : '0.0',
+          avg: g.count  > 0 ? g.total / g.count : 0
+        }));
+    },
+    get accountBreakdown() {
+  const map = {};
+  this.filteredData.forEach(d => {
+    const key = d.accountName || 'Unknown';
+    if (!map[key]) map[key] = { name: key, total: 0, count: 0 };
+    map[key].total += d.totalAmount;
+    map[key].count += 1;
+  });
+  const grand = this.kpis.totalSpent;
+  return Object.values(map)
+    .sort((a, b) => b.total - a.total)
+    .map(g => ({
+      ...g,
+      pct: grand !== 0 ? ((g.total / grand) * 100).toFixed(1) : '0.0',
+      avg: g.count  > 0 ? g.total / g.count : 0
+    }));
+},
+    get filteredTable() {
+      const q    = this.tableSearch.trim().toLowerCase();
+      const rows = [...this.filteredData].sort((a, b) =>
+        (b.creationDate || '').localeCompare(a.creationDate || '')
+      );
+      if (!q) return rows;
+      return rows.filter(r =>
+        [r.creationDate, r.category, r.accountName, String(r.accountId), String(r.totalAmount)]
+          .some(v => String(v).toLowerCase().includes(q))
+      );
+    },
+
+    renderCharts() {
+      [
+        ['chartMonthly',  () => this.renderMonthly() ],
+        ['chartCategory', () => this.renderCategory()],
+        ['chartAccounts', () => this.renderAccounts()]
+      ].forEach(([id, fn]) => {
+        try { fn(); } catch(e) { console.error(`Chart ${id}:`, e); }
+      });
+    },
+
+    renderMonthly() {
+      const map = {};
+      this.filteredData.forEach(d => {
+        if (!d.creationDate) return;
+        const key = d.creationDate.slice(0, 7);
+        map[key] = (map[key] || 0) + d.totalAmount;
+      });
+      const keys   = Object.keys(map).sort();
+      const data   = keys.map(k => map[k]);
+      const labels = keys.map(k => {
+        const [yr, mo] = k.split('-');
+        return new Date(yr, mo - 1, 1)
+          .toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+      });
+      this.replaceChart('chartMonthly', {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label:           'Spend',
+            data,
+            backgroundColor: data.map(v => v < 0 ? '#D32F2F' : '#0D3551'),
+            borderRadius:    4
+          }]
+        },
+        options: chartOpts({ y: true })
+      });
+    },
+
+    renderCategory() {
+      const grouped = groupSum(this.filteredData, 'category').slice(0, 8);
+      if (!grouped.length) return;
+      this.replaceChart('chartCategory', {
+        type: 'doughnut',
+        data: {
+          labels:   grouped.map(g => g.name),
+          datasets: [{
+            data:            grouped.map(g => g.total),
+            backgroundColor: palette,
+            borderWidth:     2,
+            borderColor:     '#fff'
+          }]
+        },
+        options: {
+          responsive:          true,
+          maintainAspectRatio: false,
+          layout: { padding: { top: 10, bottom: 10, left: 20, right: 20 } },
+          plugins: {
+            legend: {
+              position: 'right',
+              labels:   { boxWidth: 12, font: { size: 11 }, color: '#555' }
+            },
+            tooltip: {
+              callbacks: {
+                label: ctx => {
+                  const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                  const pct   = total ? ((ctx.parsed / total) * 100).toFixed(1) : '0.0';
+                  return ` ${ctx.label}: ${fmt(ctx.parsed)} (${pct}%)`;
+                }
+              }
+            }
+          }
+        }
+      });
+    },
+
+    renderAccounts() {
+      const grouped = groupSum(this.filteredData, 'accountName').slice(0, 10);
+      if (!grouped.length) return;
+      this.replaceChart('chartAccounts', {
+        type: 'bar',
+        data: {
+          labels:   grouped.map(g => g.name),
+          datasets: [{
+            label:           'Spend',
+            data:            grouped.map(g => g.total),
+            backgroundColor: '#00A793',
+            borderRadius:    4
+          }]
+        },
+        options: chartOpts({ y: true, rotateLabels: true })
+      });
+    },
+
+    fmt(n)     { return fmt(n); },
+    fmtDate(s) {
+      if (!s) return '—';
+      const d = new Date(s);
+      return isNaN(d) ? s : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    },
+
+    replaceChart(id, config) {
+      const ctx = document.getElementById(id);
+      if (!ctx) return;
+      const ex = Chart.getChart(ctx);
+      if (ex) ex.destroy();
+      if (this.charts[id]) {
+        try { this.charts[id].destroy(); } catch(e) {}
+        this.charts[id] = null;
+      }
+      this.charts[id] = new Chart(ctx, config);
+    }
+  };
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function normalizeRow(row) {
+  const v = fid => {
+    const cell = row[fid];
+    if (!cell || cell.value == null) return '';
+    if (Array.isArray(cell.value)) return cell.value.join(', ');
+    if (typeof cell.value === 'object') return cell.value.email || cell.value.name || cell.value.id || '';
+    return cell.value;
+  };
+  return {
+    creationDate: String(v(FIDS.creationDate) || ''),
+    category:     String(v(FIDS.category)     || 'Uncategorized'),
+    accountName:  String(v(FIDS.accountName)  || 'Unknown'),
+    accountId:    v(FIDS.accountId)            ?? '',
+    totalAmount:  Number(v(FIDS.totalAmount))  || 0
+  };
+}
+
+function getDateBounds(range, cs, ce) {
+  const now = Date.now(), day = 86400000;
+  switch (range) {
+    case 'last30': return [now - 30 * day, null];
+    case 'last90': return [now - 90 * day, null];
+    case 'ytd':    return [new Date(new Date().getFullYear(), 0, 1).getTime(), null];
+    case 'fy': {
+      const m = new Date().getMonth(), yr = new Date().getFullYear();
+      return [(m >= 6 ? new Date(yr, 6, 1) : new Date(yr - 1, 6, 1)).getTime(), null];
+    }
+    case 'all':    return [null, null];
+    case 'custom': return [
+      cs ? new Date(cs).getTime()           : null,
+      ce ? new Date(ce).getTime() + day     : null
+    ];
+    default: return [null, null];
+  }
+}
+
+function getFY() {
+  const d = new Date();
+  return d.getMonth() >= 6
+    ? (d.getFullYear() + 1).toString().slice(-2)
+    : d.getFullYear().toString().slice(-2);
+}
+
+function fmt(n) {
+  const num = Number(n) || 0;
+  const abs = Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (num < 0 ? '-$' : '$') + abs;
+}
+
+function kSum(arr) { return arr.reduce((a, b) => a + (Number(b) || 0), 0); }
+
+function groupSum(data, key) {
+  const map = {};
+  data.forEach(d => {
+    const k = d[key] || 'Unknown';
+    if (!map[k]) map[k] = { name: k, total: 0, count: 0 };
+    map[k].total += d.totalAmount;
+    map[k].count += 1;
+  });
+  return Object.values(map).sort((a, b) => b.total - a.total);
+}
+
+function chartOpts({ y = false, rotateLabels = false } = {}) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: y ? {
+      y: {
+        beginAtZero: true,
+        ticks: { color: '#555', callback: v => '$' + v.toLocaleString() },
+        grid:  { color: 'rgba(0,0,0,0.06)' }
+      },
+      x: rotateLabels
+        ? { ticks: { color: '#555', maxRotation: 60, minRotation: 45, autoSkip: false, font: { size: 10 } }, grid: { color: 'rgba(0,0,0,0.04)' } }
+        : { ticks: { color: '#555' }, grid: { color: 'rgba(0,0,0,0.04)' } }
+    } : {}
+  };
+}
+
+const palette = ['#771A51','#C02184','#0D3551','#00A793','#00A2C2','#F5A623','#D32F2F','#5C6BC0'];
