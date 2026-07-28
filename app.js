@@ -77,23 +77,34 @@ function dashboard() {
       this.loading = true;
       this.error   = '';
       try {
-        const r = await fetch('https://api.quickbase.com/v1/records/query', {
-          method: 'POST',
-          headers: {
-            'QB-Realm-Hostname': QB_REALM,
-            'Authorization':     `QB-USER-TOKEN ${QB_TOKEN}`,
-            'Content-Type':      'application/json'
-          },
-          body: JSON.stringify({
-            from:    TABLE_ID,
-            select:  Object.values(FIDS),
-            where:   `{'${FIDS.supervisor}'.EX.'${SUPERVISOR}'}`,
-            options: { top: 5000 }
-          })
-        });
-        if (!r.ok) throw new Error(`Quickbase API ${r.status}: ${await r.text()}`);
-        const json       = await r.json();
-        this.rawData     = (json.data || []).map(row => normalizeRow(row));
+        const pageSize = 5000;
+        let all = [], skip = 0, total = Infinity;
+        while (skip < total) {
+          const r = await fetch('https://api.quickbase.com/v1/records/query', {
+            method: 'POST',
+            headers: {
+              'QB-Realm-Hostname': QB_REALM,
+              'Authorization':     `QB-USER-TOKEN ${QB_TOKEN}`,
+              'Content-Type':      'application/json'
+            },
+            body: JSON.stringify({
+              from:    TABLE_ID,
+              select:  Object.values(FIDS),
+              where:   `{'${FIDS.supervisor}'.EX.'${SUPERVISOR}'}`,
+              sortBy:  [{ fieldId: FIDS.creationDate, order: 'DESC' }],
+              options: { top: pageSize, skip }
+            })
+          });
+          if (!r.ok) throw new Error(`Quickbase API ${r.status}: ${await r.text()}`);
+          const json = await r.json();
+          const rows = json.data || [];
+          all   = all.concat(rows);
+          total = (json.metadata && json.metadata.totalRecords != null) ? json.metadata.totalRecords : all.length;
+          if (rows.length === 0) break;
+          skip += rows.length;
+          if (skip > 100000) break;   // hard safety cap
+        }
+        this.rawData     = all.map(row => normalizeRow(row));
         this.lastUpdated = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
         this.applyFilters();
       } catch (e) {
