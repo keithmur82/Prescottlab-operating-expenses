@@ -12,10 +12,37 @@ const FIDS = {
   category:      8,
   accountName:   9,
   accountId:    10,
-  totalAmount:  11
+  totalAmount:  11,
+  itemName:     23
 };
 
+// Applies to the Operating Expenses tab (and the Animal tab after its filter).
+// Empty = show all spend. Add category/account names here to hide them.
 const EXCLUDED = [];
+
+// Animal tab keeps only rows whose Category OR Item Name matches one of these.
+const ANIMAL_KEYWORDS = [
+  'animal', 'perdiem', 'per diem',
+  'surgery', 'surgical', 'veterinary', 'diagnostic'
+];
+
+function isAnimal(d) {
+  const hay = `${d.category} ${d.itemName}`.toLowerCase();
+  return ANIMAL_KEYWORDS.some(k => hay.includes(k));
+}
+
+// Buckets an animal row into a charge type. First match wins.
+function animalType(d) {
+  const hay = `${d.category} ${d.itemName}`.toLowerCase();
+  if (hay.includes('perdiem') || hay.includes('per diem')) return 'Per Diem';
+  if (hay.includes('surgical'))                            return 'Surgical Supplies';
+  if (hay.includes('surgery'))                             return 'Surgery Services';
+  if (hay.includes('veterinary') || hay.includes(' vet')) return 'Veterinary';
+  if (hay.includes('diagnostic'))                          return 'Diagnostic';
+  if (hay.includes('purchase'))                            return 'Animal Purchases';
+  if (hay.includes('animal'))                              return 'Animal (Other)';
+  return 'Other';
+}
 // =====================================================
 
 function dashboard() {
@@ -26,6 +53,7 @@ function dashboard() {
     rawData: [],
     filteredData: [],
     filteredCount: 0,
+    view: 'animal',            // 'animal' = Animal Facility Charges, 'opex' = Operating Expenses
     currentRange: 'ytd',
     customStart: '',
     customEnd: '',
@@ -76,57 +104,68 @@ function dashboard() {
       }
     },
 
+    setView(v) {
+      if (this.view === v) return;
+      this.view = v;
+      this.applyFilters();
+    },
+
     setRange(key) {
       this.currentRange = key;
       if (key !== 'custom') this.applyFilters();
     },
 
     applyFilters() {
-  const [start, end] = getDateBounds(this.currentRange, this.customStart, this.customEnd);
-  this.filteredData  = this.rawData.filter(d => {
-    if (EXCLUDED.includes(d.category))    return false;
-    if (EXCLUDED.includes(d.accountName)) return false;
-    if (!start && !end) return true;
-    if (!d.creationDate) return false;
-    const t = new Date(d.creationDate).getTime();
-    if (start && t < start) return false;
-    if (end   && t > end  ) return false;
-    return true;
-  });
-  this.filteredCount = this.filteredData.length;
-  this.computeKPIs();
-  this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
-},
+      const [start, end] = getDateBounds(this.currentRange, this.customStart, this.customEnd);
+      this.filteredData  = this.rawData.filter(d => {
+        if (this.view === 'animal' && !isAnimal(d)) return false;   // Animal tab only
+        if (EXCLUDED.includes(d.category))    return false;
+        if (EXCLUDED.includes(d.accountName)) return false;
+        if (!start && !end) return true;
+        if (!d.creationDate) return false;
+        const t = new Date(d.creationDate).getTime();
+        if (start && t < start) return false;
+        if (end   && t > end  ) return false;
+        return true;
+      });
+      this.filteredCount = this.filteredData.length;
+      this.computeKPIs();
+      this.$nextTick(() => requestAnimationFrame(() => this.renderCharts()));
+    },
 
     computeKPIs() {
-  const totalSpent  = kSum(this.filteredData.map(d => d.totalAmount));
-  const totalOrders = this.filteredData.length;
+      const totalSpent  = kSum(this.filteredData.map(d => d.totalAmount));
+      const totalOrders = this.filteredData.length;
 
-  const catTotals = {};
-  this.filteredData.forEach(d => {
-    const cat = d.category || 'Unknown';
-    catTotals[cat] = (catTotals[cat] || 0) + d.totalAmount;
-  });
-
-  const acctTotals = {};
-  this.filteredData.forEach(d => {
-    const acct = d.accountName || 'Unknown';
-    acctTotals[acct] = (acctTotals[acct] || 0) + d.totalAmount;
-  });
-
-  const topCategory    = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
-  const topAccount     = Object.entries(acctTotals).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
-  const avgTransaction = totalOrders > 0 ? totalSpent / totalOrders : 0;
-  this.kpis = { totalSpent, totalOrders, topCategory, topAccount, avgTransaction };
-},
-
-    get categoryBreakdown() {
-      const map = {};
+      const catTotals = {};
       this.filteredData.forEach(d => {
         const cat = d.category || 'Unknown';
-        if (!map[cat]) map[cat] = { name: cat, total: 0, count: 0 };
-        map[cat].total += d.totalAmount;
-        map[cat].count += 1;
+        catTotals[cat] = (catTotals[cat] || 0) + d.totalAmount;
+      });
+
+      const acctTotals = {};
+      this.filteredData.forEach(d => {
+        const acct = d.accountName || 'Unknown';
+        acctTotals[acct] = (acctTotals[acct] || 0) + d.totalAmount;
+      });
+
+      const topCategory    = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+      const topAccount     = Object.entries(acctTotals).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+      const avgTransaction = totalOrders > 0 ? totalSpent / totalOrders : 0;
+      this.kpis = { totalSpent, totalOrders, topCategory, topAccount, avgTransaction };
+    },
+
+    get categoryBreakdown() { return breakdown(this.filteredData, 'category',    this.kpis.totalSpent); },
+    get accountBreakdown()  { return breakdown(this.filteredData, 'accountName', this.kpis.totalSpent); },
+    get itemBreakdown()     { return breakdown(this.filteredData, 'itemName',    this.kpis.totalSpent); },
+
+    get typeBreakdown() {
+      const map = {};
+      this.filteredData.forEach(d => {
+        const key = animalType(d);
+        if (!map[key]) map[key] = { name: key, total: 0, count: 0 };
+        map[key].total += d.totalAmount;
+        map[key].count += 1;
       });
       const grand = this.kpis.totalSpent;
       return Object.values(map)
@@ -137,23 +176,40 @@ function dashboard() {
           avg: g.count  > 0 ? g.total / g.count : 0
         }));
     },
-    get accountBreakdown() {
-  const map = {};
-  this.filteredData.forEach(d => {
-    const key = d.accountName || 'Unknown';
-    if (!map[key]) map[key] = { name: key, total: 0, count: 0 };
-    map[key].total += d.totalAmount;
-    map[key].count += 1;
-  });
-  const grand = this.kpis.totalSpent;
-  return Object.values(map)
-    .sort((a, b) => b.total - a.total)
-    .map(g => ({
-      ...g,
-      pct: grand !== 0 ? ((g.total / grand) * 100).toFixed(1) : '0.0',
-      avg: g.count  > 0 ? g.total / g.count : 0
-    }));
-},
+
+    get animalBreakdown() {
+      const types = {};
+      this.filteredData.forEach(d => {
+        const t = animalType(d);
+        if (!types[t]) types[t] = { name: t, total: 0, count: 0, items: {} };
+        types[t].total += d.totalAmount;
+        types[t].count += 1;
+        const item = d.itemName || d.category || 'Unknown';
+        if (!types[t].items[item]) types[t].items[item] = { name: item, total: 0, count: 0 };
+        types[t].items[item].total += d.totalAmount;
+        types[t].items[item].count += 1;
+      });
+      const grand = this.kpis.totalSpent;
+      return Object.values(types)
+        .sort((a, b) => b.total - a.total)
+        .map(t => ({
+          name:  t.name,
+          total: t.total,
+          count: t.count,
+          avg:   t.count > 0 ? t.total / t.count : 0,
+          pct:   grand !== 0 ? ((t.total / grand) * 100).toFixed(1) : '0.0',
+          items: Object.values(t.items)
+            .sort((a, b) => b.total - a.total)
+            .map(it => ({
+              name:  it.name,
+              total: it.total,
+              count: it.count,
+              avg:   it.count > 0 ? it.total / it.count : 0,
+              pct:   t.total !== 0 ? ((it.total / t.total) * 100).toFixed(1) : '0.0'
+            }))
+        }));
+    },
+
     get filteredTable() {
       const q    = this.tableSearch.trim().toLowerCase();
       const rows = [...this.filteredData].sort((a, b) =>
@@ -161,22 +217,31 @@ function dashboard() {
       );
       if (!q) return rows;
       return rows.filter(r =>
-        [r.creationDate, r.category, r.accountName, String(r.accountId), String(r.totalAmount)]
+        [r.creationDate, r.category, r.itemName, r.accountName, String(r.accountId), String(r.totalAmount)]
           .some(v => String(v).toLowerCase().includes(q))
       );
     },
 
+    // Each tab renders its OWN canvases, so switching tabs fully swaps the view.
     renderCharts() {
-      [
-        ['chartMonthly',  () => this.renderMonthly() ],
-        ['chartCategory', () => this.renderCategory()],
-        ['chartAccounts', () => this.renderAccounts()]
-      ].forEach(([id, fn]) => {
-        try { fn(); } catch(e) { console.error(`Chart ${id}:`, e); }
-      });
+      const fd = this.filteredData;
+      const jobs = this.view === 'animal'
+        ? [
+            () => this.renderBarInto('chartA_Accounts', groupSum(fd, 'accountName').slice(0, 10), '#00A793', true),
+            () => this.renderPieInto('chartA_Pie',      groupSum(fd, 'accountName').slice(0, 8)),
+            () => this.renderMonthlyInto('chartA_Monthly'),
+            () => this.renderBarInto('chartA_Items',    groupSum(fd, 'itemName').slice(0, 10), '#C02184', true),
+            () => this.renderBarInto('chartA_Types',    this.typeBreakdown.map(t => ({ name: t.name, total: t.total })), '#771A51', false)
+          ]
+        : [
+            () => this.renderBarInto('chartO_Accounts', groupSum(fd, 'accountName').slice(0, 10), '#00A793', true),
+            () => this.renderPieInto('chartO_Category', groupSum(fd, 'category').slice(0, 8)),
+            () => this.renderMonthlyInto('chartO_Monthly')
+          ];
+      jobs.forEach(fn => { try { fn(); } catch (e) { console.error('Chart:', e); } });
     },
 
-    renderMonthly() {
+    renderMonthlyInto(id) {
       const map = {};
       this.filteredData.forEach(d => {
         if (!d.creationDate) return;
@@ -187,10 +252,9 @@ function dashboard() {
       const data   = keys.map(k => map[k]);
       const labels = keys.map(k => {
         const [yr, mo] = k.split('-');
-        return new Date(yr, mo - 1, 1)
-          .toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+        return new Date(yr, mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
       });
-      this.replaceChart('chartMonthly', {
+      this.replaceChart(id, {
         type: 'bar',
         data: {
           labels,
@@ -205,29 +269,32 @@ function dashboard() {
       });
     },
 
-    renderCategory() {
-      const grouped = groupSum(this.filteredData, 'category').slice(0, 8);
+    renderBarInto(id, grouped, color, rotate = false) {
       if (!grouped.length) return;
-      this.replaceChart('chartCategory', {
+      this.replaceChart(id, {
+        type: 'bar',
+        data: {
+          labels:   grouped.map(g => g.name),
+          datasets: [{ label: 'Spend', data: grouped.map(g => g.total), backgroundColor: color, borderRadius: 4 }]
+        },
+        options: chartOpts({ y: true, rotateLabels: rotate })
+      });
+    },
+
+    renderPieInto(id, grouped) {
+      if (!grouped.length) return;
+      this.replaceChart(id, {
         type: 'doughnut',
         data: {
           labels:   grouped.map(g => g.name),
-          datasets: [{
-            data:            grouped.map(g => g.total),
-            backgroundColor: palette,
-            borderWidth:     2,
-            borderColor:     '#fff'
-          }]
+          datasets: [{ data: grouped.map(g => g.total), backgroundColor: palette, borderWidth: 2, borderColor: '#fff' }]
         },
         options: {
           responsive:          true,
           maintainAspectRatio: false,
           layout: { padding: { top: 10, bottom: 10, left: 20, right: 20 } },
           plugins: {
-            legend: {
-              position: 'right',
-              labels:   { boxWidth: 12, font: { size: 11 }, color: '#555' }
-            },
+            legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 }, color: '#555' } },
             tooltip: {
               callbacks: {
                 label: ctx => {
@@ -239,24 +306,6 @@ function dashboard() {
             }
           }
         }
-      });
-    },
-
-    renderAccounts() {
-      const grouped = groupSum(this.filteredData, 'accountName').slice(0, 10);
-      if (!grouped.length) return;
-      this.replaceChart('chartAccounts', {
-        type: 'bar',
-        data: {
-          labels:   grouped.map(g => g.name),
-          datasets: [{
-            label:           'Spend',
-            data:            grouped.map(g => g.total),
-            backgroundColor: '#00A793',
-            borderRadius:    4
-          }]
-        },
-        options: chartOpts({ y: true, rotateLabels: true })
       });
     },
 
@@ -293,10 +342,28 @@ function normalizeRow(row) {
   return {
     creationDate: String(v(FIDS.creationDate) || ''),
     category:     String(v(FIDS.category)     || 'Uncategorized'),
+    itemName:     String(v(FIDS.itemName)     || ''),
     accountName:  String(v(FIDS.accountName)  || 'Unknown'),
     accountId:    v(FIDS.accountId)            ?? '',
     totalAmount:  Number(v(FIDS.totalAmount))  || 0
   };
+}
+
+function breakdown(data, key, grand) {
+  const map = {};
+  data.forEach(d => {
+    const k = d[key] || 'Unknown';
+    if (!map[k]) map[k] = { name: k, total: 0, count: 0 };
+    map[k].total += d.totalAmount;
+    map[k].count += 1;
+  });
+  return Object.values(map)
+    .sort((a, b) => b.total - a.total)
+    .map(g => ({
+      ...g,
+      pct: grand !== 0 ? ((g.total / grand) * 100).toFixed(1) : '0.0',
+      avg: g.count  > 0 ? g.total / g.count : 0
+    }));
 }
 
 function getDateBounds(range, cs, ce) {

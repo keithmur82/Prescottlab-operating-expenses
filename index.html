@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Prescott Lab — Operating Expenses</title>
+  <title>Prescott Lab — Spend</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@400;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -24,6 +24,7 @@
       background: var(--off-white); color: var(--text-dark);
       min-height: 100vh; -webkit-font-smoothing: antialiased;
     }
+    [x-cloak] { display: none !important; }
 
     /* ── Top Bar ── */
     .top-bar {
@@ -77,6 +78,21 @@
       font-weight: 700; color: white; letter-spacing: 1px;
     }
 
+    /* ── Tabs ── */
+    .tabs {
+      display: flex; gap: 8px; padding: 12px;
+      background: var(--white); border-bottom: 1px solid var(--light-gray);
+    }
+    .tab {
+      flex: 1; padding: 12px 14px; font-size: 14px; font-weight: 700;
+      font-family: 'Montserrat', sans-serif; background: var(--off-white);
+      border: 1px solid var(--light-gray); border-radius: 10px;
+      color: var(--text-mid); cursor: pointer; text-align: center;
+      -webkit-tap-highlight-color: transparent; transition: all 0.15s;
+    }
+    .tab.active { background: var(--navy); color: white; border-color: var(--navy); }
+    .tab:active { opacity: 0.85; }
+
     /* ── Container ── */
     .container { max-width: 100%; padding: 16px 12px; }
     @media (min-width: 700px) { .container { padding: 20px 20px; } }
@@ -86,7 +102,6 @@
       display: flex; align-items: center; gap: 12px;
       margin-bottom: 14px; margin-top: 20px;
     }
-    .section-header:first-child { margin-top: 0; }
     .section-header h2 {
       font-family: 'Bitter', Georgia, serif; font-size: 13px; font-weight: 700;
       text-transform: uppercase; letter-spacing: 1.5px;
@@ -259,13 +274,9 @@
       <div class="brand-text">MIT Biology<span>Prescott Lab</span></div>
     </div>
     <div class="top-right">
-      <span class="last-updated"
-            x-show="lastUpdated"
-            x-text="'Updated: ' + lastUpdated"></span>
+      <span class="last-updated" x-show="lastUpdated" x-text="'Updated: ' + lastUpdated"></span>
       <a class="btn-nav" style="background:var(--navy);"
-         href="https://keithmur82.github.io/lab-dashboard/" target="_blank">
-         Dashboard
-      </a>
+         href="https://keithmur82.github.io/lab-dashboard/" target="_blank">Dashboard</a>
       <button class="btn-refresh" @click="loadData()">↻ Refresh</button>
     </div>
   </div>
@@ -274,13 +285,19 @@
   <div class="hero">
     <div>
       <h1>🐁 Prescott Lab</h1>
-      <div class="hero-sub">Operating Expenses</div>
+      <div class="hero-sub"
+           x-text="view === 'animal' ? 'Animal Facility Charges' : 'Operating Expenses'">Animal Facility Charges</div>
     </div>
     <div class="hero-right">
-      <div class="hero-badge"
-           x-show="filteredCount > 0"
+      <div class="hero-badge" x-show="filteredCount > 0"
            x-text="filteredCount.toLocaleString() + ' records'"></div>
     </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs" x-cloak>
+    <button class="tab" :class="{ active: view === 'animal' }" @click="setView('animal')">🐁 Animal Facility Charges</button>
+    <button class="tab" :class="{ active: view === 'opex' }"   @click="setView('opex')">💵 Operating Expenses</button>
   </div>
 
   <div class="container">
@@ -288,15 +305,12 @@
     <!-- Error -->
     <div class="error-msg" x-show="error" x-text="'⚠ ' + error"></div>
 
-    <!-- Date Range -->
+    <!-- Date Range (shared) -->
     <div class="section-header"><h2>📅 Date Range</h2></div>
     <div class="controls">
       <template x-for="r in ranges" :key="r.key">
-        <button class="range-btn"
-                :class="{ active: currentRange === r.key }"
-                @click="setRange(r.key)"
-                x-text="r.label">
-        </button>
+        <button class="range-btn" :class="{ active: currentRange === r.key }"
+                @click="setRange(r.key)" x-text="r.label"></button>
       </template>
       <template x-if="currentRange === 'custom'">
         <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -306,205 +320,279 @@
           <button class="apply-btn" @click="applyFilters()">Apply</button>
         </span>
       </template>
-      <span class="ctrl-meta"
-            x-show="filteredCount > 0"
+      <span class="ctrl-meta" x-show="filteredCount > 0"
             x-text="filteredCount.toLocaleString() + ' records'"></span>
     </div>
 
-    <!-- Summary -->
+    <!-- Summary (shared) -->
     <div class="kpi-grid">
-  <div class="kpi-card" style="border-top-color:var(--navy)">
-    <div class="kpi-label">Total Spend</div>
-    <div class="kpi-value"
-         :class="{ neg: kpis.totalSpent < 0 }"
-         x-text="fmt(kpis.totalSpent)">—</div>
-  </div>
-  <div class="kpi-card" style="border-top-color:var(--teal)">
-    <div class="kpi-label">Transactions</div>
-    <div class="kpi-value"
-         x-text="kpis.totalOrders.toLocaleString()">—</div>
-  </div>
-  <div class="kpi-card" style="border-top-color:var(--pink)">
-    <div class="kpi-label">Top Account</div>
-    <div class="kpi-value small"
-         x-text="kpis.topAccount">—</div>
-  </div>
-  <div class="kpi-card" style="border-top-color:var(--burgundy)">
-    <div class="kpi-label">Top Category</div>
-    <div class="kpi-value small"
-         x-text="kpis.topCategory">—</div>
-  </div>
-  <div class="kpi-card" style="border-top-color:var(--blue)">
-    <div class="kpi-label">Avg per Transaction</div>
-    <div class="kpi-value"
-         :class="{ neg: kpis.avgTransaction < 0 }"
-         x-text="fmt(kpis.avgTransaction)">—</div>
-  </div>
-</div>
-
-    <!-- Charts -->
-    <div class="section-header"><h2>📊 Charts</h2></div>
-    <!-- Accounts chart — full width, prominent -->
-<div class="card">
-  <div class="card-header">
-    <div class="card-title">🏦 Spend by Account</div>
-    <span class="table-head-meta"
-          x-text="accountBreakdown.length + ' accounts'"></span>
-  </div>
-  <div class="chart-wrapper" style="height:320px">
-    <canvas id="chartAccounts"></canvas>
-  </div>
-</div>
-
-<!-- Monthly + Category side by side -->
-<div class="charts-row">
-  <div class="card" style="margin-bottom:0">
-    <div class="card-header">
-      <div class="card-title">📈 Monthly Spend</div>
-    </div>
-    <div class="chart-wrapper">
-      <canvas id="chartMonthly"></canvas>
-    </div>
-  </div>
-  <div class="card" style="margin-bottom:0">
-    <div class="card-header">
-      <div class="card-title">🥧 By Category</div>
-    </div>
-    <div class="chart-wrapper">
-      <canvas id="chartCategory"></canvas>
-    </div>
-  </div>
-</div>
-<!-- Account Breakdown -->
-<div class="section-header"><h2>🏦 Account Breakdown</h2></div>
-<div class="table-card">
-  <div class="table-head">
-    <span class="table-head-title">Spend by Account</span>
-    <span class="table-head-meta"
-          x-text="accountBreakdown.length + ' accounts'"></span>
-  </div>
-  <div class="table-scroll">
-    <table>
-      <thead>
-        <tr>
-          <th>Account Name</th>
-          <th>Total</th>
-          <th>Transactions</th>
-          <th>% of Total</th>
-          <th>Avg per Transaction</th>
-        </tr>
-      </thead>
-      <tbody>
-        <template x-if="accountBreakdown.length === 0">
-          <tr><td colspan="5" class="no-data">No data for this period.</td></tr>
-        </template>
-        <template x-for="row in accountBreakdown" :key="row.name">
-          <tr>
-            <td style="font-weight:600;color:var(--navy)" x-text="row.name"></td>
-            <td :class="row.total < 0 ? 'amount-neg' : 'amount'"
-                x-text="fmt(row.total)"></td>
-            <td x-text="row.count.toLocaleString()"></td>
-            <td>
-              <span x-text="row.pct + '%'"></span>
-              <div class="pct-bar-bg">
-                <div class="pct-bar"
-                     :style="`width:${Math.min(Math.abs(parseFloat(row.pct)),100)}%`">
-                </div>
-              </div>
-            </td>
-            <td :class="row.avg < 0 ? 'amount-neg' : 'amount'"
-                x-text="fmt(row.avg)"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
-  </div>
-</div>
-    <!-- Category Breakdown -->
-    <div class="section-header"><h2>🗂️ Category Breakdown</h2></div>
-    <div class="table-card">
-      <div class="table-head">
-        <span class="table-head-title">Spend by Category</span>
-        <span class="table-head-meta"
-              x-text="categoryBreakdown.length + ' categories'"></span>
+      <div class="kpi-card" style="border-top-color:var(--navy)">
+        <div class="kpi-label">Total Spend</div>
+        <div class="kpi-value" :class="{ neg: kpis.totalSpent < 0 }" x-text="fmt(kpis.totalSpent)">—</div>
       </div>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th>Total</th>
-              <th>Transactions</th>
-              <th>% of Total</th>
-              <th>Avg per Transaction</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-if="categoryBreakdown.length === 0">
-              <tr><td colspan="5" class="no-data">No data for this period.</td></tr>
-            </template>
-            <template x-for="row in categoryBreakdown" :key="row.name">
-              <tr>
-                <td><span class="cat-badge" x-text="row.name"></span></td>
-                <td :class="row.total < 0 ? 'amount-neg' : 'amount'"
-                    x-text="fmt(row.total)"></td>
-                <td x-text="row.count.toLocaleString()"></td>
-                <td>
-                  <span x-text="row.pct + '%'"></span>
-                  <div class="pct-bar-bg">
-                    <div class="pct-bar"
-                         :style="`width:${Math.min(Math.abs(parseFloat(row.pct)),100)}%`">
-                    </div>
-                  </div>
-                </td>
-                <td :class="row.avg < 0 ? 'amount-neg' : 'amount'"
-                    x-text="fmt(row.avg)"></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
+      <div class="kpi-card" style="border-top-color:var(--teal)">
+        <div class="kpi-label">Transactions</div>
+        <div class="kpi-value" x-text="kpis.totalOrders.toLocaleString()">—</div>
+      </div>
+      <div class="kpi-card" style="border-top-color:var(--pink)">
+        <div class="kpi-label">Top Account</div>
+        <div class="kpi-value small" x-text="kpis.topAccount">—</div>
+      </div>
+      <div class="kpi-card" style="border-top-color:var(--burgundy)">
+        <div class="kpi-label">Top Category</div>
+        <div class="kpi-value small" x-text="kpis.topCategory">—</div>
+      </div>
+      <div class="kpi-card" style="border-top-color:var(--blue)">
+        <div class="kpi-label">Avg per Transaction</div>
+        <div class="kpi-value" :class="{ neg: kpis.avgTransaction < 0 }" x-text="fmt(kpis.avgTransaction)">—</div>
       </div>
     </div>
 
-    <!-- Transactions -->
-    <div class="section-header"><h2>📋 Transactions</h2></div>
-    <div class="table-card">
-      <div class="table-head">
-        <span class="table-head-title">All Transactions</span>
-        <input class="search-input"
-               type="text"
-               placeholder="Search…"
-               x-model="tableSearch"/>
+    <!-- ================= ANIMAL FACILITY CHARGES PANEL ================= -->
+    <div x-show="view === 'animal'" x-cloak>
+
+      <!-- Animal Charge Types -->
+      <div class="section-header"><h2>🩺 Animal Charge Types</h2></div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🩺 Spend by Charge Type</div>
+          <span class="table-head-meta" x-text="animalBreakdown.length + ' types'"></span>
+        </div>
+        <div class="chart-wrapper" style="height:300px"><canvas id="chartA_Types"></canvas></div>
       </div>
-      <div class="table-scroll">
-        <table>
-          <thead>
-  <tr>
-    <th>Account Name</th>
-    <th>Account ID</th>
-    <th>Category</th>
-    <th>Date</th>
-    <th>Amount</th>
-  </tr>
-</thead>
-          <tbody>
-            <template x-if="filteredTable.length === 0">
-              <tr><td colspan="5" class="no-data">No records found.</td></tr>
+      <div class="table-card">
+        <div class="table-head">
+          <span class="table-head-title">Vet · Surgery · Per Diem · etc. — tap a type to expand its items</span>
+          <span class="table-head-meta" x-text="animalBreakdown.length + ' types'"></span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Charge Type / Item</th><th>Total</th><th>Transactions</th><th>% of Total</th><th>Avg per Transaction</th></tr>
+            </thead>
+            <template x-if="animalBreakdown.length === 0">
+              <tbody><tr><td colspan="5" class="no-data">No data for this period.</td></tr></tbody>
             </template>
-            <template x-for="(row, i) in filteredTable" :key="i">
-  <tr>
-    <td style="font-weight:600;color:var(--navy)" x-text="row.accountName"></td>
-    <td x-text="row.accountId"></td>
-    <td><span class="cat-badge" x-text="row.category"></span></td>
-    <td x-text="fmtDate(row.creationDate)"></td>
-    <td :class="row.totalAmount < 0 ? 'amount-neg' : 'amount'"
-        x-text="fmt(row.totalAmount)"></td>
-  </tr>
-</template>
-          </tbody>
-        </table>
+            <template x-for="grp in animalBreakdown" :key="grp.name">
+              <tbody x-data="{ open: false }">
+                <tr @click="open = !open" style="cursor:pointer; background:var(--off-white);">
+                  <td style="font-weight:700; color:var(--burgundy)">
+                    <span x-text="open ? '▾' : '▸'" style="display:inline-block; width:14px;"></span>
+                    <span x-text="grp.name"></span>
+                  </td>
+                  <td :class="grp.total < 0 ? 'amount-neg' : 'amount'" x-text="fmt(grp.total)"></td>
+                  <td x-text="grp.count.toLocaleString()"></td>
+                  <td>
+                    <span x-text="grp.pct + '%'"></span>
+                    <div class="pct-bar-bg"><div class="pct-bar" :style="`width:${Math.min(Math.abs(parseFloat(grp.pct)),100)}%`"></div></div>
+                  </td>
+                  <td :class="grp.avg < 0 ? 'amount-neg' : 'amount'" x-text="fmt(grp.avg)"></td>
+                </tr>
+                <template x-for="it in grp.items" :key="grp.name + '::' + it.name">
+                  <tr x-show="open">
+                    <td style="padding-left:34px; color:var(--text-mid)" x-text="it.name"></td>
+                    <td :class="it.total < 0 ? 'amount-neg' : 'amount'" x-text="fmt(it.total)"></td>
+                    <td x-text="it.count.toLocaleString()"></td>
+                    <td style="color:var(--text-light); font-size:12px" x-text="it.pct + '% of type'"></td>
+                    <td :class="it.avg < 0 ? 'amount-neg' : 'amount'" x-text="fmt(it.avg)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </template>
+          </table>
+        </div>
       </div>
-    </div>
+
+      <!-- Charts -->
+      <div class="section-header"><h2>📊 Charts</h2></div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🏦 Spend by Account</div>
+          <span class="table-head-meta" x-text="accountBreakdown.length + ' accounts'"></span>
+        </div>
+        <div class="chart-wrapper" style="height:320px"><canvas id="chartA_Accounts"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">🐁 Spend by Item</div></div>
+        <div class="chart-wrapper" style="height:320px"><canvas id="chartA_Items"></canvas></div>
+      </div>
+      <div class="charts-row">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header"><div class="card-title">📈 Monthly Spend</div></div>
+          <div class="chart-wrapper"><canvas id="chartA_Monthly"></canvas></div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header"><div class="card-title">🥧 By Account</div></div>
+          <div class="chart-wrapper"><canvas id="chartA_Pie"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Account Breakdown -->
+      <div class="section-header"><h2>🏦 Account Breakdown</h2></div>
+      <div class="table-card">
+        <div class="table-head">
+          <span class="table-head-title">Spend by Account</span>
+          <span class="table-head-meta" x-text="accountBreakdown.length + ' accounts'"></span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Account Name</th><th>Total</th><th>Transactions</th><th>% of Total</th><th>Avg per Transaction</th></tr></thead>
+            <tbody>
+              <template x-if="accountBreakdown.length === 0"><tr><td colspan="5" class="no-data">No data for this period.</td></tr></template>
+              <template x-for="row in accountBreakdown" :key="row.name">
+                <tr>
+                  <td style="font-weight:600;color:var(--navy)" x-text="row.name"></td>
+                  <td :class="row.total < 0 ? 'amount-neg' : 'amount'" x-text="fmt(row.total)"></td>
+                  <td x-text="row.count.toLocaleString()"></td>
+                  <td>
+                    <span x-text="row.pct + '%'"></span>
+                    <div class="pct-bar-bg"><div class="pct-bar" :style="`width:${Math.min(Math.abs(parseFloat(row.pct)),100)}%`"></div></div>
+                  </td>
+                  <td :class="row.avg < 0 ? 'amount-neg' : 'amount'" x-text="fmt(row.avg)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Transactions (with Item Name) -->
+      <div class="section-header"><h2>📋 Transactions</h2></div>
+      <div class="table-card">
+        <div class="table-head">
+          <span class="table-head-title">All Transactions</span>
+          <input class="search-input" type="text" placeholder="Search…" x-model="tableSearch"/>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Account Name</th><th>Account ID</th><th>Category</th><th>Item Name</th><th>Date</th><th>Amount</th></tr></thead>
+            <tbody>
+              <template x-if="filteredTable.length === 0"><tr><td colspan="6" class="no-data">No records found.</td></tr></template>
+              <template x-for="(row, i) in filteredTable" :key="i">
+                <tr>
+                  <td style="font-weight:600;color:var(--navy)" x-text="row.accountName"></td>
+                  <td x-text="row.accountId"></td>
+                  <td><span class="cat-badge" x-text="row.category"></span></td>
+                  <td x-text="row.itemName"></td>
+                  <td x-text="fmtDate(row.creationDate)"></td>
+                  <td :class="row.totalAmount < 0 ? 'amount-neg' : 'amount'" x-text="fmt(row.totalAmount)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /Animal panel -->
+
+    <!-- ================= OPERATING EXPENSES PANEL (original) ================= -->
+    <div x-show="view === 'opex'" x-cloak>
+
+      <!-- Charts -->
+      <div class="section-header"><h2>📊 Charts</h2></div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🏦 Spend by Account</div>
+          <span class="table-head-meta" x-text="accountBreakdown.length + ' accounts'"></span>
+        </div>
+        <div class="chart-wrapper" style="height:320px"><canvas id="chartO_Accounts"></canvas></div>
+      </div>
+      <div class="charts-row">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header"><div class="card-title">📈 Monthly Spend</div></div>
+          <div class="chart-wrapper"><canvas id="chartO_Monthly"></canvas></div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header"><div class="card-title">🥧 By Category</div></div>
+          <div class="chart-wrapper"><canvas id="chartO_Category"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Account Breakdown -->
+      <div class="section-header"><h2>🏦 Account Breakdown</h2></div>
+      <div class="table-card">
+        <div class="table-head">
+          <span class="table-head-title">Spend by Account</span>
+          <span class="table-head-meta" x-text="accountBreakdown.length + ' accounts'"></span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Account Name</th><th>Total</th><th>Transactions</th><th>% of Total</th><th>Avg per Transaction</th></tr></thead>
+            <tbody>
+              <template x-if="accountBreakdown.length === 0"><tr><td colspan="5" class="no-data">No data for this period.</td></tr></template>
+              <template x-for="row in accountBreakdown" :key="row.name">
+                <tr>
+                  <td style="font-weight:600;color:var(--navy)" x-text="row.name"></td>
+                  <td :class="row.total < 0 ? 'amount-neg' : 'amount'" x-text="fmt(row.total)"></td>
+                  <td x-text="row.count.toLocaleString()"></td>
+                  <td>
+                    <span x-text="row.pct + '%'"></span>
+                    <div class="pct-bar-bg"><div class="pct-bar" :style="`width:${Math.min(Math.abs(parseFloat(row.pct)),100)}%`"></div></div>
+                  </td>
+                  <td :class="row.avg < 0 ? 'amount-neg' : 'amount'" x-text="fmt(row.avg)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Category Breakdown -->
+      <div class="section-header"><h2>🗂️ Category Breakdown</h2></div>
+      <div class="table-card">
+        <div class="table-head">
+          <span class="table-head-title">Spend by Category</span>
+          <span class="table-head-meta" x-text="categoryBreakdown.length + ' categories'"></span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Category</th><th>Total</th><th>Transactions</th><th>% of Total</th><th>Avg per Transaction</th></tr></thead>
+            <tbody>
+              <template x-if="categoryBreakdown.length === 0"><tr><td colspan="5" class="no-data">No data for this period.</td></tr></template>
+              <template x-for="row in categoryBreakdown" :key="row.name">
+                <tr>
+                  <td><span class="cat-badge" x-text="row.name"></span></td>
+                  <td :class="row.total < 0 ? 'amount-neg' : 'amount'" x-text="fmt(row.total)"></td>
+                  <td x-text="row.count.toLocaleString()"></td>
+                  <td>
+                    <span x-text="row.pct + '%'"></span>
+                    <div class="pct-bar-bg"><div class="pct-bar" :style="`width:${Math.min(Math.abs(parseFloat(row.pct)),100)}%`"></div></div>
+                  </td>
+                  <td :class="row.avg < 0 ? 'amount-neg' : 'amount'" x-text="fmt(row.avg)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Transactions (original columns) -->
+      <div class="section-header"><h2>📋 Transactions</h2></div>
+      <div class="table-card">
+        <div class="table-head">
+          <span class="table-head-title">All Transactions</span>
+          <input class="search-input" type="text" placeholder="Search…" x-model="tableSearch"/>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Account Name</th><th>Account ID</th><th>Category</th><th>Date</th><th>Amount</th></tr></thead>
+            <tbody>
+              <template x-if="filteredTable.length === 0"><tr><td colspan="5" class="no-data">No records found.</td></tr></template>
+              <template x-for="(row, i) in filteredTable" :key="i">
+                <tr>
+                  <td style="font-weight:600;color:var(--navy)" x-text="row.accountName"></td>
+                  <td x-text="row.accountId"></td>
+                  <td><span class="cat-badge" x-text="row.category"></span></td>
+                  <td x-text="fmtDate(row.creationDate)"></td>
+                  <td :class="row.totalAmount < 0 ? 'amount-neg' : 'amount'" x-text="fmt(row.totalAmount)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /Operating Expenses panel -->
 
   </div>
 
@@ -517,7 +605,7 @@
       <div class="footer-bar" style="background:#00A793"></div>
       <div class="footer-bar" style="background:#00A2C2"></div>
     </div>
-    <div class="footer-text">MIT Biology — Prescott Lab Operating Expenses</div>
+    <div class="footer-text">MIT Biology — Prescott Lab</div>
   </div>
 
   <script src="app.js"></script>
