@@ -18,7 +18,7 @@ const FIDS = {
 
 // Applies to the Operating Expenses tab (and the Animal tab after its filter).
 // Empty = show all spend. Add category/account names here to hide them.
-const EXCLUDED = [];
+const EXCLUDED = ['F&A', 'F&A Adjustments', 'Uncategorized'];
 
 // Animal tab keeps only rows whose Category OR Item Name matches one of these.
 const ANIMAL_KEYWORDS = [
@@ -440,4 +440,3 @@ function chartOpts({ y = false, rotateLabels = false } = {}) {
 }
 
 const palette = ['#771A51','#C02184','#0D3551','#00A793','#00A2C2','#F5A623','#D32F2F','#5C6BC0'];
-
