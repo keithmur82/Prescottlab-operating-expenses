@@ -60,8 +60,9 @@ function dashboard() {
     tableSearch: '',
     ranges: [
       { key: 'last30', label: 'Last 30'      },
-      { key: 'last90', label: 'Last 90'      },
-      { key: 'ytd',    label: 'YTD'          },
+      { key: 'last90',  label: 'Last 90'      },
+      { key: 'last365', label: 'Last 365'     },
+      { key: 'ytd',     label: 'YTD'          },
       { key: 'fy',     label: `FY${getFY()}` },
       { key: 'all',    label: 'All Time'     },
       { key: 'custom', label: 'Custom'       }
@@ -382,6 +383,7 @@ function getDateBounds(range, cs, ce) {
   switch (range) {
     case 'last30': return [now - 30 * day, null];
     case 'last90': return [now - 90 * day, null];
+    case 'last365': return [now - 365 * day, null];
     case 'ytd':    return [new Date(new Date().getFullYear(), 0, 1).getTime(), null];
     case 'fy': {
       const m = new Date().getMonth(), yr = new Date().getFullYear();
